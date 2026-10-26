@@ -167,6 +167,26 @@ pub fn check_output_not_on_disk(output: &std::path::Path, source_disk: u32) -> R
     }
 }
 
+/// Попередження, якщо шлях для результату лежить на знімному носії.
+///
+/// Запис образу чи тисяч відновлених файлів на USB-флешку буває в десятки разів
+/// повільнішим, ніж на внутрішній SSD: флешки погано тримають дрібні записи, а
+/// антивірус перечитує файл, що росте. Під час розробки образ на флешку йшов
+/// ~400 КіБ/с проти ~20 МіБ/с на NVMe. Це не помилка, тож запис не забороняється —
+/// лише попередження.
+pub fn removable_output_warning(output: &std::path::Path) -> Option<String> {
+    let disks = disks_of_path(output).ok()?;
+    let info = list_disks()
+        .into_iter()
+        .find(|d| disks.contains(&d.index) && d.is_likely_removable_media())?;
+    Some(format!(
+        "{} лежить на знімному носії ({}). Запис туди може бути в десятки разів повільнішим, \
+         ніж на внутрішній диск; якщо поступ повзе — оберіть теку на внутрішньому SSD.",
+        output.display(),
+        info.model
+    ))
+}
+
 /// Фізичний диск, відкритий на читання.
 pub struct RawDisk {
     file: File,

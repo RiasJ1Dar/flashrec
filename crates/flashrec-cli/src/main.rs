@@ -10,7 +10,9 @@ use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 use flashrec_core::carve;
-use flashrec_core::device::{check_output_not_on_disk, human_bytes, list_disks, RawDisk};
+use flashrec_core::device::{
+    check_output_not_on_disk, human_bytes, list_disks, removable_output_warning, RawDisk,
+};
 use flashrec_core::imaging::{create_image, format_duration, ImagingOptions};
 use flashrec_core::ntfs::format_filetime;
 use flashrec_core::ntfs::volume::{
@@ -211,6 +213,9 @@ fn cmd_image(f: &Flags) -> Result<(), String> {
     }
 
     check_output_not_on_disk(&out, index)?;
+    if let Some(w) = removable_output_warning(&out) {
+        println!("УВАГА: {w}");
+    }
 
     if out.exists() && !f.has("resume") {
         return Err(format!(
@@ -278,10 +283,18 @@ fn source_from(f: &Flags) -> Result<Source, String> {
     }
 }
 
-/// Коли читаємо живий диск, `--out` не може лежати на ньому ж.
+/// Коли читаємо живий диск, `--out` не може лежати на ньому ж; запис на знімний
+/// носій дозволений, але з попередженням.
 fn guard_output(f: &Flags, src: &Source) -> Result<(), String> {
-    if let (Source::Disk(n), Some(out)) = (src, f.get("out")) {
-        check_output_not_on_disk(std::path::Path::new(out), *n)?;
+    let Some(out) = f.get("out") else {
+        return Ok(());
+    };
+    let out = std::path::Path::new(out);
+    if let Source::Disk(n) = src {
+        check_output_not_on_disk(out, *n)?;
+    }
+    if let Some(w) = removable_output_warning(out) {
+        println!("УВАГА: {w}");
     }
     Ok(())
 }

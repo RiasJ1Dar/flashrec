@@ -16,7 +16,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, RichText};
-use flashrec_core::device::{check_output_not_on_disk, human_bytes, list_disks, DiskInfo};
+use flashrec_core::device::{
+    check_output_not_on_disk, human_bytes, list_disks, removable_output_warning, DiskInfo,
+};
 use flashrec_core::ntfs::volume::{ScanMethod, DELETED_DIR, LIVE_DIR, PARTIAL_SUFFIX};
 use flashrec_core::source::Source;
 use worker::{Job, Level, Msg, Row, ScanOutcome};
@@ -237,11 +239,15 @@ impl App {
             self.log(Level::Error, "спершу оберіть, куди записувати");
             return false;
         }
+        let path = std::path::Path::new(out.trim());
         if let Some(Source::Disk(n)) = self.current_source() {
-            if let Err(e) = check_output_not_on_disk(std::path::Path::new(out.trim()), n) {
+            if let Err(e) = check_output_not_on_disk(path, n) {
                 self.log(Level::Error, e);
                 return false;
             }
+        }
+        if let Some(w) = removable_output_warning(path) {
+            self.log(Level::Warn, w);
         }
         true
     }
