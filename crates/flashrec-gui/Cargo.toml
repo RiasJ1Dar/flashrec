@@ -1,0 +1,30 @@
+[package]
+name = "flashrec-gui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Графічний інтерфейс flashrec"
+
+[[bin]]
+name = "flashrec-gui"
+path = "src/main.rs"
+
+[dependencies]
+# glow (OpenGL) замість типового wgpu: менший бінарник, швидша збірка, і він
+# працює на старих офісних машинах, де зазвичай і доводиться рятувати дані.
+eframe = { version = "0.36.2", default-features = false, features = [
+    "accesskit",
+    "default_fonts",
+    "glow",
+    "links",
+    "wayland",
+    "x11",
+] }
+# eframe вмикає типові можливості winit лише через свій `default`, а його вище
+# вимкнено — тому вони запитуються тут. Серед них `rwh_06`, без якого glow не працює.
+winit = "0.30.13"
+flashrec-core = { path = "../flashrec-core" }
+rfd = "0.17.2"

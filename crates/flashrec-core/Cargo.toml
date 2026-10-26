@@ -1,0 +1,12 @@
+[package]
+name = "flashrec-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Рушій flashrec: сирий доступ до дисків, зняття образу, розбір NTFS, вирізання за сигнатурами"
+
+# Зовнішніх залежностей немає навмисно: шлях порятунку даних мусить збиратися офлайн.
+[dependencies]

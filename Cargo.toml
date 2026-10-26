@@ -1,0 +1,19 @@
+[workspace]
+members = ["crates/flashrec-core", "crates/flashrec-cli", "crates/flashrec-gui"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+license = "MIT"
+repository = "https://github.com/RiasJ1Dar/flashrec"
+authors = ["Viktor Hartunh"]
+description = "Відновлення файлів із флешок, що відмовляють: посекторний образ, розбір MFT NTFS і вирізання за сигнатурами"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true

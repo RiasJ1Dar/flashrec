@@ -1,0 +1,4 @@
+# Кінці рядків у репозиторії — LF, хоч би яка машина комітила.
+* text=auto eol=lf
+*.png binary
+*.ico binary
