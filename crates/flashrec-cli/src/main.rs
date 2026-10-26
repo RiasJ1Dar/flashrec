@@ -14,7 +14,8 @@ use flashrec_core::device::{check_output_not_on_disk, human_bytes, list_disks, R
 use flashrec_core::imaging::{create_image, format_duration, ImagingOptions};
 use flashrec_core::ntfs::format_filetime;
 use flashrec_core::ntfs::volume::{
-    recover_files, NtfsVolume, RecoveryOptions, DELETED_DIR, LIVE_DIR, PARTIAL_SUFFIX,
+    is_ntfs_metadata, recover_files, NtfsVolume, RecoveryOptions, DELETED_DIR, LIVE_DIR,
+    PARTIAL_SUFFIX,
 };
 use flashrec_core::reader::{BlockDevice, SubDevice};
 use flashrec_core::source::{open_ntfs, open_source, Source};
@@ -333,8 +334,22 @@ fn cmd_scan(f: &Flags) -> Result<(), String> {
     let paths = vol.build_paths(&result);
     let limit = f.parse_u64("limit")?.unwrap_or(200) as usize;
 
-    let mut files: Vec<_> = result.files().collect();
+    let all = result.files().count();
+    let mut files: Vec<_> = result
+        .files()
+        .filter(|e| {
+            paths
+                .get(&e.record_number)
+                .is_none_or(|p| !is_ntfs_metadata(e.record_number, p))
+        })
+        .collect();
     files.sort_by_key(|e| std::cmp::Reverse(e.size));
+    if all > files.len() {
+        println!(
+            "службових файлів NTFS приховано: {} (вони не відновлюються)",
+            all - files.len()
+        );
+    }
 
     println!("\n{:<9} {:>11}  {:<19}  ШЛЯХ", "СТАН", "РОЗМІР", "ЗМІНЕНО");
     for e in files.iter().take(limit) {

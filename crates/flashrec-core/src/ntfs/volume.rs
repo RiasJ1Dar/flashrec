@@ -25,6 +25,20 @@ pub const DELETED_DIR: &str = "видалені";
 /// Суфікс файлу, в якому нечитані кластери заповнено нулями.
 pub const PARTIAL_SUFFIX: &str = ".НЕПОВНИЙ";
 
+/// Чи це службовий файл NTFS, а не дані користувача.
+///
+/// Номера записів замало: `$Extend\$RmMetadata\$TxfLog\…` мають номери вище 16,
+/// хоча належать самій файловій системі. Тому службовим вважається й усе, чий
+/// перший компонент шляху починається з `$` — у корені тому такі імена має
+/// лише NTFS.
+pub fn is_ntfs_metadata(record_number: u64, path: &Path) -> bool {
+    record_number < FIRST_USER_RECORD
+        || path
+            .components()
+            .next()
+            .is_some_and(|c| c.as_os_str().to_string_lossy().starts_with('$'))
+}
+
 /// Один файл або тека, знайдені в MFT.
 #[derive(Debug, Clone)]
 pub struct FileEntry {
@@ -575,7 +589,17 @@ pub fn recover_files<D: BlockDevice>(
     fs::create_dir_all(dest)?;
     let paths = volume.build_paths(result);
 
-    let candidates: Vec<&FileEntry> = result.entries.iter().filter(|e| opts.accepts(e)).collect();
+    let candidates: Vec<&FileEntry> = result
+        .entries
+        .iter()
+        .filter(|e| opts.accepts(e))
+        .filter(|e| {
+            opts.include_system
+                || paths
+                    .get(&e.record_number)
+                    .is_none_or(|p| !is_ntfs_metadata(e.record_number, p))
+        })
+        .collect();
     let files_total = candidates.len() as u64;
     let mut report = RecoveryReport {
         skipped_by_filter: result.entries.len() as u64 - files_total,
@@ -749,6 +773,18 @@ mod tests {
         assert!(!opts.accepts(&entry));
         opts.only_records = Some(HashSet::from([100]));
         assert!(opts.accepts(&entry));
+    }
+
+    #[test]
+    fn metadata_is_recognised_by_number_and_by_path() {
+        assert!(is_ntfs_metadata(0, Path::new("$MFT")));
+        assert!(is_ntfs_metadata(
+            40,
+            Path::new(r"$Extend\$RmMetadata\$TxfLog\$TxfLogContainer00000000000000000001")
+        ));
+        assert!(!is_ntfs_metadata(40, Path::new(r"all\scripts\trace.log")));
+        // `$` усередині шляху, а не в корені, — звичайний файл користувача.
+        assert!(!is_ntfs_metadata(40, Path::new(r"звіти\$чернетка.docx")));
     }
 
     #[test]

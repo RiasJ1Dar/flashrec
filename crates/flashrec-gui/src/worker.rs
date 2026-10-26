@@ -18,7 +18,9 @@ use flashrec_core::carve::{carve, CarveReport};
 use flashrec_core::device::{human_bytes, list_disks, RawDisk};
 use flashrec_core::imaging::{create_image, format_duration, ImagingOptions, ImagingReport};
 use flashrec_core::ntfs::format_filetime;
-use flashrec_core::ntfs::volume::{recover_files, RecoveryOptions, RecoveryReport, ScanResult};
+use flashrec_core::ntfs::volume::{
+    is_ntfs_metadata, recover_files, RecoveryOptions, RecoveryReport, ScanResult,
+};
 use flashrec_core::reader::{BlockDevice, SubDevice};
 use flashrec_core::source::{open_ntfs, open_source, Source};
 
@@ -250,8 +252,14 @@ pub fn spawn_scan(ctx: egui::Context, tx: Sender<Msg>, source: Source, sweep: bo
             .map_err(|e| e.to_string())?;
 
             let paths = opened.volume.build_paths(&result);
+            // Службові файли NTFS не відновлюються, тож у таблиці вони лише плутали б.
             let mut rows: Vec<Row> = result
                 .files()
+                .filter(|e| {
+                    paths
+                        .get(&e.record_number)
+                        .is_none_or(|p| !is_ntfs_metadata(e.record_number, p))
+                })
                 .map(|e| {
                     let path = paths
                         .get(&e.record_number)

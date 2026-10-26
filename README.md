@@ -81,7 +81,7 @@ flashrec carve   --image D:\відновлення\flash.img --out E:\відно
 
 ## Збирання
 
-Потрібен Rust 1.70 або новіший.
+Потрібен Rust 1.82 або новіший.
 
 ```
 cargo build --release
