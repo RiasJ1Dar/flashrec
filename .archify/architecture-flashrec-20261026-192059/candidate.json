@@ -1,0 +1,220 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "flashrec — від флешки до відновлених файлів",
+    "output": ".archify/architecture-flashrec-20261026-192059/flashrec.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/RiasJ1Dar/flashrec.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "8465d64bdb56e28360bd21b22dcac7042c6f0b34"
+    }
+  },
+  "components": [
+    {
+      "id": "person",
+      "type": "external",
+      "label": "Людина",
+      "sublabel": "від адміністратора",
+      "icon": "person",
+      "pos": [40, 200],
+      "size": [110, 64]
+    },
+    {
+      "id": "gui",
+      "type": "frontend",
+      "label": "flashrec-gui",
+      "sublabel": "egui, фонові потоки",
+      "pos": [230, 110],
+      "size": [140, 64],
+      "sources": [
+        { "path": "crates/flashrec-gui/src/main.rs", "line": 33, "label": "запуск вікна" },
+        { "path": "crates/flashrec-gui/src/worker.rs", "line": 165, "label": "spawn_image" }
+      ]
+    },
+    {
+      "id": "cli",
+      "type": "frontend",
+      "label": "flashrec",
+      "sublabel": "командний рядок",
+      "pos": [230, 290],
+      "size": [140, 64],
+      "sources": [
+        { "path": "crates/flashrec-cli/src/main.rs", "line": 57, "label": "розбір команд" },
+        { "path": "crates/flashrec-cli/src/main.rs", "line": 176, "label": "cmd_image" }
+      ]
+    },
+    {
+      "id": "flash",
+      "type": "external",
+      "label": "Флешка",
+      "sublabel": "\\\\.\\PhysicalDriveN",
+      "pos": [470, 40],
+      "size": [150, 60]
+    },
+    {
+      "id": "device",
+      "type": "security",
+      "label": "Доступ до диска",
+      "sublabel": "IOCTL, серійний",
+      "tag": "не той диск — відмова",
+      "pos": [470, 200],
+      "size": [150, 64],
+      "sources": [
+        { "path": "crates/flashrec-core/src/device.rs", "line": 75, "label": "list_disks" },
+        { "path": "crates/flashrec-core/src/device.rs", "line": 154, "label": "check_output_not_on_disk" },
+        { "path": "crates/flashrec-core/src/sys.rs", "line": 124, "label": "storage_identity" }
+      ]
+    },
+    {
+      "id": "imaging",
+      "type": "backend",
+      "label": "Зняття образу",
+      "sublabel": "повтори, посекторно",
+      "pos": [730, 200],
+      "size": [150, 64],
+      "sources": [
+        { "path": "crates/flashrec-core/src/imaging.rs", "line": 139, "label": "create_image" },
+        { "path": "crates/flashrec-core/src/imaging.rs", "line": 280, "label": "write_map_file" }
+      ]
+    },
+    {
+      "id": "image",
+      "type": "database",
+      "label": "Файл образу",
+      "sublabel": ".img + карта .map",
+      "pos": [990, 200],
+      "size": [150, 64],
+      "sources": [
+        { "path": "crates/flashrec-core/src/imaging.rs", "line": 280, "label": "карта нечитаних смуг" }
+      ]
+    },
+    {
+      "id": "source",
+      "type": "backend",
+      "label": "Відкриття тому",
+      "sublabel": "MBR, підпис, зсув 0",
+      "pos": [990, 370],
+      "size": [150, 64],
+      "sources": [
+        { "path": "crates/flashrec-core/src/source.rs", "line": 81, "label": "open_ntfs" },
+        { "path": "crates/flashrec-core/src/partition.rs", "line": 80, "label": "locate_ntfs" }
+      ]
+    },
+    {
+      "id": "scan",
+      "type": "backend",
+      "label": "Сканування MFT",
+      "sublabel": "runlist або перебір FILE",
+      "pos": [730, 370],
+      "size": [150, 64],
+      "sources": [
+        { "path": "crates/flashrec-core/src/ntfs/volume.rs", "line": 215, "label": "scan" },
+        { "path": "crates/flashrec-core/src/ntfs/mod.rs", "line": 112, "label": "read_boot" },
+        { "path": "crates/flashrec-core/src/ntfs/record.rs", "line": 355, "label": "decode_runlist" }
+      ]
+    },
+    {
+      "id": "recover",
+      "type": "backend",
+      "label": "Відновлення",
+      "sublabel": "дерево тек",
+      "tag": "дірки → .НЕПОВНИЙ",
+      "pos": [470, 370],
+      "size": [150, 64],
+      "sources": [
+        { "path": "crates/flashrec-core/src/ntfs/volume.rs", "line": 580, "label": "recover_files" },
+        { "path": "crates/flashrec-core/src/ntfs/volume.rs", "line": 414, "label": "build_paths" }
+      ]
+    },
+    {
+      "id": "out",
+      "type": "database",
+      "label": "Тека результату",
+      "sublabel": "наявні \\ видалені",
+      "pos": [470, 540],
+      "size": [150, 64],
+      "sources": [
+        { "path": "crates/flashrec-core/src/ntfs/volume.rs", "line": 580, "label": "запис файлів" }
+      ]
+    },
+    {
+      "id": "carve",
+      "type": "backend",
+      "label": "Вирізання",
+      "sublabel": "останній засіб",
+      "pos": [990, 540],
+      "size": [150, 64],
+      "sources": [
+        { "path": "crates/flashrec-core/src/carve.rs", "line": 162, "label": "carve" },
+        { "path": "crates/flashrec-core/src/carve.rs", "line": 29, "label": "SIGNATURES" }
+      ]
+    },
+    {
+      "id": "carved",
+      "type": "database",
+      "label": "Вирізані файли",
+      "sublabel": "без імен і тек",
+      "pos": [730, 540],
+      "size": [150, 64],
+      "sources": [
+        { "path": "crates/flashrec-core/src/carve.rs", "line": 162, "label": "запис вирізаного" }
+      ]
+    }
+  ],
+  "connections": [
+    { "id": "person-gui", "from": "person", "to": "gui", "label": "запускає" },
+    { "id": "person-cli", "from": "person", "to": "cli", "label": "команди" },
+    { "id": "gui-device", "from": "gui", "to": "device", "label": "вибір диска" },
+    { "id": "cli-device", "from": "cli", "to": "device", "label": "--disk N" },
+    { "id": "flash-device", "from": "flash", "to": "device", "label": "лише читання", "variant": "security" },
+    { "id": "device-imaging", "from": "device", "to": "imaging", "label": "блоки 1 МіБ", "variant": "emphasis" },
+    { "id": "imaging-image", "from": "imaging", "to": "image", "label": "образ + .map", "variant": "emphasis" },
+    { "id": "image-source", "from": "image", "to": "source", "label": "відкрити", "variant": "emphasis" },
+    { "id": "source-scan", "from": "source", "to": "scan", "label": "том NTFS", "variant": "emphasis" },
+    { "id": "scan-recover", "from": "scan", "to": "recover", "label": "записи MFT", "variant": "emphasis" },
+    { "id": "recover-out", "from": "recover", "to": "out", "label": "файли" },
+    { "id": "source-carve", "from": "source", "to": "carve", "label": "сирі байти", "variant": "dashed" },
+    { "id": "carve-carved", "from": "carve", "to": "carved", "label": "за сигнатурою", "variant": "dashed" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Три crate",
+      "items": [
+        "flashrec-core — рушій без жодної зовнішньої залежності",
+        "flashrec-cli і flashrec-gui викликають ті самі функції ядра",
+        "GUI — egui на glow, довгі завдання у фонових потоках"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Запобіжники",
+      "items": [
+        "на флешку не пишеться нічого",
+        "серійний номер звіряється перед зняттям образу",
+        "результат не можна записати на диск-джерело"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Без тихих втрат",
+      "items": [
+        "нечитані сектори — нулі, але з обліком у .map",
+        "файли з дірками отримують суфікс .НЕПОВНИЙ",
+        "стиснені й EFS-файли пропускаються зі звітом"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Коли MFT зламаний",
+      "items": [
+        "резервний завантажувальний сектор у кінці тому",
+        "перебір усього тому в пошуках записів FILE",
+        "вирізання за сигнатурами — без імен і тек"
+      ]
+    }
+  ]
+}

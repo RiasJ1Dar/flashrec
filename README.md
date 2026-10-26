@@ -107,6 +107,11 @@ cargo test
 
 ## Будова
 
+Інтерактивна схема архітектури —
+[`.archify/architecture-flashrec-20261026-192059/flashrec.html`](.archify/architecture-flashrec-20261026-192059/flashrec.html):
+завантажте файл і відкрийте в браузері. Джерело схеми — `candidate.json` поруч;
+кожен вузол посилається на рядки коду, з яких його намальовано.
+
 ```
 crates/
   flashrec-core/   рушій без залежностей
