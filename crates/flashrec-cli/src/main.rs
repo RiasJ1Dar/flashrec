@@ -32,6 +32,7 @@ flashrec — відновлення файлів із флешок, що від�
       знайти файли й показати список
   flashrec recover (--image ФАЙЛ | --disk N) --out ТЕКА [--offset БАЙТИ] [--sweep]
                    [--no-deleted] [--ext jpg,png,...]
+                   [--path ПІДРЯДОК,...] [--exclude-path ПІДРЯДОК,...]
       записати знайдені файли в теку
   flashrec carve   (--image ФАЙЛ | --disk N) --out ТЕКА [--offset БАЙТИ]
       вирізати файли за сигнатурами, коли сканування нічого не дало
@@ -42,6 +43,8 @@ flashrec — відновлення файлів із флешок, що від�
   --sweep            перебрати весь том у пошуках записів MFT, не довіряючи $MFT
   --no-deleted       не відновлювати видалені файли
   --ext              лише файли з цими розширеннями
+  --path             лише файли, чий шлях містить один із підрядків
+  --exclude-path     пропустити файли, чий шлях містить один із підрядків
 
 Працюйте з образом, де тільки можливо: зніміть його один раз і більше не
 чіпайте диск. flashrec ніколи нічого не пише на диск-джерело.
@@ -378,7 +381,41 @@ fn cmd_recover(f: &Flags) -> Result<(), String> {
     let mut vol = open_volume(f)?;
     let result = run_scan(&mut vol, f)?;
 
+    // Фільтр за шляхом: підрядки без огляду на регістр, через кому.
+    let split = |key: &str| -> Vec<String> {
+        f.get(key)
+            .map(|s| {
+                s.split(',')
+                    .map(|p| p.trim().to_lowercase())
+                    .filter(|p| !p.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let include = split("path");
+    let exclude = split("exclude-path");
+    let only_records = if include.is_empty() && exclude.is_empty() {
+        None
+    } else {
+        let paths = vol.build_paths(&result);
+        let chosen: std::collections::HashSet<u64> = result
+            .files()
+            .filter(|e| {
+                let p = paths
+                    .get(&e.record_number)
+                    .map(|p| p.to_string_lossy().to_lowercase())
+                    .unwrap_or_else(|| e.name.to_lowercase());
+                (include.is_empty() || include.iter().any(|s| p.contains(s.as_str())))
+                    && !exclude.iter().any(|s| p.contains(s.as_str()))
+            })
+            .map(|e| e.record_number)
+            .collect();
+        println!("за фільтром шляху відібрано файлів: {}", chosen.len());
+        Some(chosen)
+    };
+
     let opts = RecoveryOptions {
+        only_records,
         include_deleted: !f.has("no-deleted"),
         include_system: f.has("system"),
         extensions: f

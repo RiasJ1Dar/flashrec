@@ -61,6 +61,13 @@ flashrec recover --image D:\відновлення\flash.img --out E:\відно
 flashrec carve   --image D:\відновлення\flash.img --out E:\відновлення\вирізане
 ```
 
+Відновити лише частину — за підрядком шляху, без огляду на регістр:
+
+```
+flashrec recover --image D:\відновлення\flash.img --out E:\відновлення\файли --path Документи,Фото
+flashrec recover --image D:\відновлення\flash.img --out E:\відновлення\файли --exclude-path Office\Data
+```
+
 `flashrec --help` — повний перелік параметрів.
 
 ## Порада щодо швидкості
