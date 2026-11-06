@@ -17,12 +17,10 @@ use eframe::egui;
 use flashrec_core::carve::{carve, CarveReport};
 use flashrec_core::device::{human_bytes, list_disks, RawDisk};
 use flashrec_core::imaging::{create_image, format_duration, ImagingOptions, ImagingReport};
+use flashrec_core::files::{recover_files, RecoveryOptions, RecoveryReport, ScanProgress, ScanResult};
 use flashrec_core::ntfs::format_filetime;
-use flashrec_core::ntfs::volume::{
-    is_ntfs_metadata, recover_files, RecoveryOptions, RecoveryReport, ScanResult,
-};
 use flashrec_core::reader::{BlockDevice, SubDevice};
-use flashrec_core::source::{open_ntfs, open_source, Source};
+use flashrec_core::source::{open_source, open_volume, Source};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Level {
@@ -59,8 +57,10 @@ pub struct Row {
     pub size: u64,
     pub in_use: bool,
     pub modified: String,
-    /// Чому файл не повернеться цілим, якщо це вже відомо.
-    pub note: Option<&'static str>,
+    /// Чому файл буде пропущено, якщо це вже відомо.
+    pub skip: Option<&'static str>,
+    /// Що варто знати, перш ніж довіряти вмісту.
+    pub caveat: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -214,7 +214,7 @@ pub fn spawn_image(
     })
 }
 
-/// Знайти том NTFS і перелічити його файли.
+/// Знайти том і перелічити його файли.
 pub fn spawn_scan(ctx: egui::Context, tx: Sender<Msg>, source: Source, sweep: bool) -> Job {
     start(JobKind::Scan, move |cancel| {
         let mut r = Reporter::new(tx, ctx);
@@ -225,12 +225,17 @@ pub fn spawn_scan(ctx: egui::Context, tx: Sender<Msg>, source: Source, sweep: bo
                     "читаю живий диск — з образом безпечніше: зніміть його один раз і більше не чіпайте диск",
                 );
             }
-            let mut opened = open_ntfs(&source, None).map_err(|e| e.to_string())?;
+            let mut opened = open_volume(&source, None).map_err(|e| e.to_string())?;
             for line in opened.describe() {
-                r.log(Level::Info, line);
+                let level = if line.starts_with("УВАГА") {
+                    Level::Warn
+                } else {
+                    Level::Info
+                };
+                r.log(level, line);
             }
 
-            let mut on_progress = |p: flashrec_core::ntfs::volume::ScanProgress| {
+            let mut on_progress = |p: ScanProgress| {
                 let fraction = if p.total == 0 {
                     0.0
                 } else {
@@ -239,26 +244,26 @@ pub fn spawn_scan(ctx: egui::Context, tx: Sender<Msg>, source: Source, sweep: bo
                 r.progress(
                     fraction,
                     format!(
-                        "переглянуто записів: {}  ·  знайдено: {}",
+                        "переглянуто: {}  ·  знайдено: {}",
                         p.records_examined, p.entries_found
                     ),
                 );
             };
             let result = if sweep {
-                opened.volume.scan_by_signature(cancel, &mut on_progress)
+                opened.volume.scan_deep(cancel, &mut on_progress)
             } else {
                 opened.volume.scan(cancel, &mut on_progress)
             }
             .map_err(|e| e.to_string())?;
 
-            let paths = opened.volume.build_paths(&result);
+            let paths = result.paths();
             // Службові файли NTFS не відновлюються, тож у таблиці вони лише плутали б.
             let mut rows: Vec<Row> = result
                 .files()
                 .filter(|e| {
                     paths
                         .get(&e.record_number)
-                        .is_none_or(|p| !is_ntfs_metadata(e.record_number, p))
+                        .is_none_or(|p| !result.is_metadata(e, p))
                 })
                 .map(|e| {
                     let path = paths
@@ -275,7 +280,8 @@ pub fn spawn_scan(ctx: egui::Context, tx: Sender<Msg>, source: Source, sweep: bo
                             .timestamps
                             .map(|t| format_filetime(t.modified))
                             .unwrap_or_else(|| "-".into()),
-                        note: e.data.as_ref().and_then(|d| d.unsupported_encoding()),
+                        skip: e.data.as_ref().and_then(|d| d.unsupported_encoding()),
+                        caveat: e.caveat,
                     }
                 })
                 .collect();
@@ -308,7 +314,7 @@ pub fn spawn_recover(
         let mut r = Reporter::new(tx, ctx);
         let result = (|| -> Result<RecoveryReport, String> {
             // Відкрити знову на тому самому зсуві, що й сканування, — щоб записи збіглися точно.
-            let mut opened = open_ntfs(&source, Some(offset)).map_err(|e| e.to_string())?;
+            let mut opened = open_volume(&source, Some(offset)).map_err(|e| e.to_string())?;
             let opts = RecoveryOptions {
                 include_deleted,
                 only_records,

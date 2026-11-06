@@ -13,14 +13,14 @@ use flashrec_core::carve;
 use flashrec_core::device::{
     check_output_not_on_disk, human_bytes, list_disks, removable_output_warning, RawDisk,
 };
-use flashrec_core::imaging::{create_image, format_duration, ImagingOptions};
-use flashrec_core::ntfs::format_filetime;
-use flashrec_core::ntfs::volume::{
-    is_ntfs_metadata, recover_files, NtfsVolume, RecoveryOptions, DELETED_DIR, LIVE_DIR,
+use flashrec_core::files::{
+    recover_files, RecoveryOptions, ScanProgress, ScanResult, DELETED_DIR, LIVE_DIR,
     PARTIAL_SUFFIX,
 };
+use flashrec_core::imaging::{create_image, format_duration, ImagingOptions};
+use flashrec_core::ntfs::format_filetime;
 use flashrec_core::reader::{BlockDevice, SubDevice};
-use flashrec_core::source::{open_ntfs, open_source, Source};
+use flashrec_core::source::{open_source, open_volume, Source, Volume};
 
 const USAGE: &str = "\
 flashrec — відновлення файлів із флешок, що відмовляють
@@ -42,7 +42,9 @@ flashrec — відновлення файлів із флешок, що від�
 ПАРАМЕТРИ:
   --expect-serial С  відмовити, якщо серійний номер диска не збігається
   --resume           продовжити перерване зняття образу
-  --sweep            перебрати весь том у пошуках записів MFT, не довіряючи $MFT
+  --sweep            глибокий пошук: для NTFS — перебрати весь том у пошуках записів
+                     MFT, не довіряючи $MFT; для FAT і exFAT — перебрати всі кластери
+                     в пошуках тек, на які вже ніщо не вказує (після форматування)
   --no-deleted       не відновлювати видалені файли
   --ext              лише файли з цими розширеннями
   --path             лише файли, чий шлях містить один із підрядків
@@ -299,27 +301,24 @@ fn guard_output(f: &Flags, src: &Source) -> Result<(), String> {
     Ok(())
 }
 
-/// Відкрити том NTFS, заданий через `--image`/`--disk` і `--offset`.
-fn open_volume(f: &Flags) -> Result<NtfsVolume<Box<dyn BlockDevice>>, String> {
+/// Відкрити том, заданий через `--image`/`--disk` і `--offset`.
+fn open_volume_from(f: &Flags) -> Result<Volume, String> {
     let src = source_from(f)?;
     guard_output(f, &src)?;
     if src.is_live_disk() {
         println!("читаю живий диск — з образом (`flashrec image`) безпечніше");
     }
-    let opened = open_ntfs(&src, f.parse_u64("offset")?).map_err(|e| e.to_string())?;
+    let opened = open_volume(&src, f.parse_u64("offset")?).map_err(|e| e.to_string())?;
     for line in opened.describe() {
         println!("{line}");
     }
     Ok(opened.volume)
 }
 
-fn run_scan(
-    vol: &mut NtfsVolume<Box<dyn BlockDevice>>,
-    f: &Flags,
-) -> Result<flashrec_core::ntfs::volume::ScanResult, String> {
+fn run_scan(vol: &mut Volume, f: &Flags) -> Result<ScanResult, String> {
     let cancel = AtomicBool::new(false);
     let mut last = Instant::now();
-    let mut on_progress = |p: flashrec_core::ntfs::volume::ScanProgress| {
+    let mut on_progress = |p: ScanProgress| {
         if last.elapsed().as_millis() >= 500 {
             last = Instant::now();
             let pct = if p.total == 0 {
@@ -328,14 +327,14 @@ fn run_scan(
                 p.offset as f64 / p.total as f64 * 100.0
             };
             print!(
-                "\r  сканую {pct:6.2}%  переглянуто записів: {}  знайдено: {}      ",
+                "\r  сканую {pct:6.2}%  переглянуто: {}  знайдено: {}      ",
                 p.records_examined, p.entries_found
             );
             let _ = io::stdout().flush();
         }
     };
     let result = if f.has("sweep") {
-        vol.scan_by_signature(&cancel, &mut on_progress)
+        vol.scan_deep(&cancel, &mut on_progress)
     } else {
         vol.scan(&cancel, &mut on_progress)
     }
@@ -345,9 +344,9 @@ fn run_scan(
 }
 
 fn cmd_scan(f: &Flags) -> Result<(), String> {
-    let mut vol = open_volume(f)?;
+    let mut vol = open_volume_from(f)?;
     let result = run_scan(&mut vol, f)?;
-    let paths = vol.build_paths(&result);
+    let paths = result.paths();
     let limit = f.parse_u64("limit")?.unwrap_or(200) as usize;
 
     let all = result.files().count();
@@ -356,7 +355,7 @@ fn cmd_scan(f: &Flags) -> Result<(), String> {
         .filter(|e| {
             paths
                 .get(&e.record_number)
-                .is_none_or(|p| !is_ntfs_metadata(e.record_number, p))
+                .is_none_or(|p| !result.is_metadata(e, p))
         })
         .collect();
     files.sort_by_key(|e| std::cmp::Reverse(e.size));
@@ -374,24 +373,30 @@ fn cmd_scan(f: &Flags) -> Result<(), String> {
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|| e.name.clone());
         println!(
-            "{:<9} {:>11}  {:<19}  {}",
+            "{:<9} {:>11}  {:<19}  {}{}",
             if e.in_use { "наявний" } else { "ВИДАЛЕНИЙ" },
             human_bytes(e.size),
             e.timestamps
                 .map(|t| format_filetime(t.modified))
                 .unwrap_or_else(|| "-".into()),
-            path
+            path,
+            if e.note().is_some() { "  *" } else { "" }
         );
     }
     if files.len() > limit {
         println!("… і ще {} (збільште --limit)", files.len() - limit);
+    }
+    let notes: std::collections::BTreeSet<&str> =
+        files.iter().take(limit).filter_map(|e| e.note()).collect();
+    for note in notes {
+        println!("* {note}");
     }
     Ok(())
 }
 
 fn cmd_recover(f: &Flags) -> Result<(), String> {
     let out = PathBuf::from(f.require("out")?);
-    let mut vol = open_volume(f)?;
+    let mut vol = open_volume_from(f)?;
     let result = run_scan(&mut vol, f)?;
 
     // Фільтр за шляхом: підрядки без огляду на регістр, через кому.
@@ -410,7 +415,7 @@ fn cmd_recover(f: &Flags) -> Result<(), String> {
     let only_records = if include.is_empty() && exclude.is_empty() {
         None
     } else {
-        let paths = vol.build_paths(&result);
+        let paths = result.paths();
         let chosen: std::collections::HashSet<u64> = result
             .files()
             .filter(|e| {

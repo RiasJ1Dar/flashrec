@@ -19,7 +19,7 @@ use eframe::egui::{self, Color32, RichText};
 use flashrec_core::device::{
     check_output_not_on_disk, human_bytes, list_disks, removable_output_warning, DiskInfo,
 };
-use flashrec_core::ntfs::volume::{ScanMethod, DELETED_DIR, LIVE_DIR, PARTIAL_SUFFIX};
+use flashrec_core::files::{ScanMethod, DELETED_DIR, LIVE_DIR, PARTIAL_SUFFIX};
 use flashrec_core::source::Source;
 use worker::{Job, Level, Msg, Row, ScanOutcome};
 
@@ -377,10 +377,13 @@ impl App {
                 if files == 0 {
                     let hint = match method {
                         ScanMethod::MftRunlist => {
-                            "через MFT нічого не знайдено — спробуйте ще раз з увімкненим «Перебором підписів»"
+                            "через MFT нічого не знайдено — спробуйте ще раз з увімкненим «Глибоким пошуком»"
                         }
-                        ScanMethod::SignatureSweep => {
-                            "записів MFT не лишилось — скористайтеся «Вирізати», щоб дістати файли за вмістом"
+                        ScanMethod::DirectoryTree => {
+                            "у теках нічого не знайдено — спробуйте ще раз з увімкненим «Глибоким пошуком»"
+                        }
+                        ScanMethod::SignatureSweep | ScanMethod::DirectorySweep => {
+                            "файлових записів не лишилось — скористайтеся «Вирізати», щоб дістати файли за вмістом"
                         }
                     };
                     self.log(Level::Warn, hint);
@@ -514,7 +517,7 @@ impl App {
         if !self.guard_output(&out) {
             return;
         }
-        // Вирізати лише розділ NTFS, якщо сканування його вже знайшло.
+        // Вирізати лише розділ, якщо сканування його вже знайшло.
         let offset = self
             .scan
             .as_ref()
@@ -587,9 +590,11 @@ impl App {
                 // 3. Сканування
                 section(ui, "3", "Сканувати");
                 ui.add_enabled_ui(!busy, |ui| {
-                    ui.checkbox(&mut self.scan_sweep, "Перебір підписів").on_hover_text(
-                        "Перечитати кожен сектор у пошуках записів MFT, а не довіряти $MFT. \
-                         Повільніше, зате знаходить файли, на які пошкоджений MFT уже не вказує.",
+                    ui.checkbox(&mut self.scan_sweep, "Глибокий пошук").on_hover_text(
+                        "NTFS: перечитати кожен сектор у пошуках записів MFT, а не довіряти $MFT.\n\
+                         FAT і exFAT: перебрати всі кластери в пошуках тек, на які вже ніщо не \
+                         вказує, — так знаходяться файли після швидкого форматування.\n\
+                         Повільніше, зате знаходить те, чого звичайне сканування не бачить.",
                     );
                     if ui.button("Сканувати").clicked() {
                         self.start_scan(&ctx);
@@ -904,11 +909,16 @@ fn draw_row(ui: &mut egui::Ui, row_h: f32, row: &Row) {
             [COL_MODIFIED, row_h],
             egui::Label::new(RichText::new(&row.modified).monospace().small().weak()),
         );
-        let text = match row.note {
-            Some(note) => RichText::new(format!("{}   [{note}: буде пропущено]", row.path))
+        let text = match (row.skip, row.caveat) {
+            (Some(skip), _) => RichText::new(format!("{}   [{skip}: буде пропущено]", row.path))
                 .color(color(Level::Error)),
-            None => RichText::new(&row.path),
+            (None, Some(_)) => RichText::new(format!("{}   [вміст за припущенням]", row.path))
+                .color(color(Level::Warn)),
+            (None, None) => RichText::new(&row.path),
         };
-        ui.add(egui::Label::new(text).truncate());
+        let label = ui.add(egui::Label::new(text).truncate());
+        if let Some(caveat) = row.caveat {
+            label.on_hover_text(caveat);
+        }
     });
 }

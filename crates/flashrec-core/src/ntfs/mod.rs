@@ -10,6 +10,7 @@ pub mod volume;
 
 use std::io;
 
+pub use crate::files::BootSource;
 use crate::reader::{u16_at, u64_at, BlockDevice};
 
 /// Запис `$Boot` на початку тому NTFS.
@@ -134,24 +135,6 @@ pub fn read_boot<D: BlockDevice>(dev: &mut D) -> io::Result<(NtfsBoot, BootSourc
     ))
 }
 
-/// Яка копія завантажувального запису виявилась придатною.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BootSource {
-    Primary,
-    Backup { offset: u64 },
-}
-
-impl BootSource {
-    pub fn describe(&self) -> String {
-        match self {
-            BootSource::Primary => "основний".to_string(),
-            BootSource::Backup { offset } => {
-                format!("РЕЗЕРВНИЙ на зсуві {offset} (основний пошкоджено)")
-            }
-        }
-    }
-}
-
 /// 64-бітне посилання MFT: 48 бітів номера запису і 16 бітів послідовності.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MftRef(pub u64);
@@ -212,6 +195,41 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
+/// Обернений до [`civil_from_days`]: календарна дата → дні від епохи Unix.
+fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = (y - era * 400) as u64;
+    let mp = if m > 2 { m - 3 } else { m + 9 } as u64;
+    let doy = (153 * mp + 2) / 5 + d as u64 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe as i64 - 719_468
+}
+
+/// Календарні дата й час → FILETIME, або `None` для неможливої дати.
+///
+/// FAT і exFAT зберігають час частинами, а решта flashrec показує FILETIME,
+/// тож обидві файлові системи переводять свій час сюди.
+pub fn civil_to_filetime(
+    year: i64,
+    month: u32,
+    day: u32,
+    hour: u32,
+    minute: u32,
+    second: u32,
+    hundredths: u32,
+) -> Option<u64> {
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 59
+    {
+        return None;
+    }
+    let secs = days_from_civil(year, month, day) * 86_400
+        + (hour * 3600 + minute * 60 + second) as i64;
+    const EPOCH_DIFF: i64 = 116_444_736_000_000_000;
+    let ft = secs.checked_mul(10_000_000)? + hundredths as i64 * 100_000 + EPOCH_DIFF;
+    u64::try_from(ft).ok()
+}
+
 pub(crate) fn bad(msg: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, msg.into())
 }
@@ -263,5 +281,13 @@ mod tests {
         // 2021-01-01 00:00:00 UTC = unix 1_609_459_200
         let ft = 132_539_328_000_000_000u64;
         assert_eq!(format_filetime(ft), "2021-01-01 00:00:00");
+    }
+
+    #[test]
+    fn civil_time_round_trips_through_filetime() {
+        let ft = civil_to_filetime(2026, 11, 6, 17, 45, 30, 0).unwrap();
+        assert_eq!(format_filetime(ft), "2026-11-06 17:45:30");
+        assert_eq!(civil_to_filetime(2021, 1, 1, 0, 0, 0, 0), Some(132_539_328_000_000_000));
+        assert!(civil_to_filetime(2021, 13, 1, 0, 0, 0, 0).is_none());
     }
 }
